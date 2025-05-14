@@ -1,0 +1,24 @@
+{
+  "name": "postmark-mcp-server",
+  "version": "1.0.0",
+  "description": "Simple Postmark email sending utility",
+  "main": "postmark-mcp-server.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "send-email": "node send-test-email.js",
+    "start": "node postmark-mcp-server.js"
+  },
+  "keywords": [
+    "postmark",
+    "email",
+    "mcp"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.11.2",
+    "dotenv": "^16.5.0",
+    "postmark": "^4.0.5"
+  }
+}
