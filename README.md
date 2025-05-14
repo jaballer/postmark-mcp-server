@@ -14,7 +14,7 @@ An MCP server implementation for Postmark email services.
 
 1. **Clone the repository:**
    ```sh
-   git clone <your-repo-url>
+   git clone https://github.com/jaballer/postmark-mcp-server.git
    cd postmark-mcp-server
    ```
 
