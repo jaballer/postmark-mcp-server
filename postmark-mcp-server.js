@@ -6,8 +6,17 @@ import 'dotenv/config'; // Loads environment variables from .env if present
  * Postmark MCP Server
  * An MCP server implementation for Postmark email services
  *
+ * This server provides a Model Context Protocol interface to Postmark's email API.
+ * It allows AI models to send emails, manage templates, check delivery stats,
+ * and perform domain management operations through standardized tools.
+ *
  * See README.md for environment variable setup instructions.
  *
+ * Required environment variables:
+ * - POSTMARK_SERVER_TOKEN: Your Postmark API token
+ * - DEFAULT_SENDER_EMAIL: Default email address to send from
+ * - DEFAULT_MESSAGE_STREAM: Default message stream to use
+ * 
  * Author: [Your Name]
  * Version: 1.0.0
  * License: MIT
@@ -15,15 +24,16 @@ import 'dotenv/config'; // Loads environment variables from .env if present
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
-import postmark from "postmark";
-import fetch from "node-fetch";
+import { z } from "zod"; // Used for input validation
+import postmark from "postmark"; // Postmark SDK
+import fetch from "node-fetch"; // For API calls not covered by the SDK
 
-// Postmark config
+// Postmark configuration
 const serverToken = process.env.POSTMARK_SERVER_TOKEN;
 const defaultSender = process.env.DEFAULT_SENDER_EMAIL;
 const defaultMessageStream = process.env.DEFAULT_MESSAGE_STREAM;
 
+// Validate required environment variables
 if (!serverToken) {
   throw new Error('POSTMARK_SERVER_TOKEN is not set. Please configure it in your .env file.');
 }
@@ -34,21 +44,28 @@ if (!defaultMessageStream) {
   throw new Error('DEFAULT_MESSAGE_STREAM is not set. Please configure it in your .env file.');
 }
 
+// Initialize Postmark client
 const client = new postmark.ServerClient(serverToken);
 
+// Initialize MCP server
 const server = new McpServer({
   name: "postmark-mcp",
   version: "1.0.0"
 });
 
-// Register the sendEmail tool
+/**
+ * Send a single email
+ * 
+ * Sends an email to a specified recipient with the provided subject and content.
+ * Defaults to environment-defined sender and message stream if not specified.
+ */
 server.tool(
   "sendEmail",
   {
+    from: z.string().optional(),
     to: z.string().email(),
     subject: z.string(),
     textBody: z.string(),
-    from: z.string().optional(),
     messageStream: z.string().optional()
   },
   async ({ to, subject, textBody, from, messageStream }) => {
@@ -69,7 +86,12 @@ server.tool(
   }
 );
 
-// Register the sendEmail tool
+/**
+ * Send multiple emails in a batch
+ * 
+ * Efficiently sends multiple emails in a single API call.
+ * Each message can have its own recipient, subject, and content.
+ */
 server.tool(
   "sendEmailBatch",
   {
@@ -94,6 +116,12 @@ server.tool(
   }
 );
 
+/**
+ * Send an email using a template
+ * 
+ * Uses a Postmark template with the provided data model.
+ * Templates must be created in Postmark or via the createTemplate tool.
+ */
 server.tool(
   "sendEmailWithTemplate",
   {
@@ -115,7 +143,14 @@ server.tool(
   }
 );
 
-// Template Management
+// Template Management Tools
+
+/**
+ * Create a new email template
+ * 
+ * Creates a reusable email template in Postmark with the specified content.
+ * Returns the template ID which can be used with sendEmailWithTemplate.
+ */
 server.tool(
   "createTemplate",
   {
@@ -137,6 +172,12 @@ server.tool(
   }
 );
 
+/**
+ * Update an existing email template
+ * 
+ * Modifies an existing template identified by templateId.
+ * Only the provided fields will be updated.
+ */
 server.tool(
   "updateTemplate",
   {
@@ -153,6 +194,11 @@ server.tool(
   }
 );
 
+/**
+ * List all email templates
+ * 
+ * Retrieves all templates associated with the Postmark account.
+ */
 server.tool(
   "listTemplates",
   {},
@@ -162,6 +208,11 @@ server.tool(
   }
 );
 
+/**
+ * Get a specific template by ID
+ * 
+ * Retrieves detailed information about a single template.
+ */
 server.tool(
   "getTemplate",
   { templateId: z.number() },
@@ -171,7 +222,14 @@ server.tool(
   }
 );
 
-// Statistics & Tracking (custom delivery stats tool)
+// Statistics & Tracking Tools
+
+/**
+ * Get email delivery statistics
+ * 
+ * Retrieves delivery statistics for the last 30 days,
+ * including open rates and bounce rates.
+ */
 server.tool(
   "getDeliveryStats",
   {},
@@ -201,6 +259,11 @@ server.tool(
   }
 );
 
+/**
+ * Get sent message history
+ * 
+ * Retrieves a list of recently sent outbound messages with pagination.
+ */
 server.tool(
   "getOutboundMessages",
   {
@@ -213,7 +276,14 @@ server.tool(
   }
 );
 
-// Domain Management
+// Domain Management Tools
+
+/**
+ * Create a new sending domain
+ * 
+ * Registers a new domain with Postmark for sending emails.
+ * Domain verification will be required after creation.
+ */
 server.tool(
   "createDomain",
   {
@@ -226,6 +296,11 @@ server.tool(
   }
 );
 
+/**
+ * Verify domain DKIM setup
+ * 
+ * Checks if DKIM records have been properly configured for a domain.
+ */
 server.tool(
   "verifyDomainDKIM",
   { domainId: z.number() },
@@ -235,6 +310,11 @@ server.tool(
   }
 );
 
+/**
+ * Verify domain return path setup
+ * 
+ * Checks if return path records have been properly configured for a domain.
+ */
 server.tool(
   "verifyDomainReturnPath",
   { domainId: z.number() },
@@ -244,6 +324,7 @@ server.tool(
   }
 );
 
+// Initialize and start the server
 console.error('Starting MCP server...');
 const transport = new StdioServerTransport();
 console.error('About to connect server...');

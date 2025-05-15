@@ -1,0 +1,13 @@
+{
+    "mcpServers": {
+      "postmark": {
+        "name": "Postmark MCP",
+        "command": "/Users/you-name/your-location/postmark-mcp-server/postmark-mcp-server.js",
+        "env": {
+          "POSTMARK_SERVER_TOKEN": "your-postmark-server-token",
+          "DEFAULT_SENDER_EMAIL": "your-default-sender-email",
+          "DEFAULT_MESSAGE_STREAM": "your-default-message-stream"
+        }
+      }
+    }
+  }
