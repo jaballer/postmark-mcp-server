@@ -3,23 +3,17 @@
 import 'dotenv/config'; // Loads environment variables from .env if present
 
 /**
- * Postmark MCP Server
- * An MCP server implementation for Postmark email services
+ * @file Postmark MCP Server
+ * @description A Cursor MCP server implementation for Postmark's email API.
+ * Provides a CursorModel Context Protocol interface to Postmark, enabling AI models to send emails, manage templates, check delivery stats, and perform domain management.
  *
- * This server provides a Model Context Protocol interface to Postmark's email API.
- * It allows AI models to send emails, manage templates, check delivery stats,
- * and perform domain management operations through standardized tools.
+ * @author Jabal Torres
+ * @version 1.0.0
+ * @license MIT
  *
- * See README.md for environment variable setup instructions.
- *
- * Required environment variables:
- * - POSTMARK_SERVER_TOKEN: Your Postmark API token
- * - DEFAULT_SENDER_EMAIL: Default email address to send from
- * - DEFAULT_MESSAGE_STREAM: Default message stream to use
- * 
- * Author: [Your Name]
- * Version: 1.0.0
- * License: MIT
+ * @requires POSTMARK_SERVER_TOKEN - Your Postmark API token
+ * @requires DEFAULT_SENDER_EMAIL - Default email address to send from
+ * @requires DEFAULT_MESSAGE_STREAM - Default message stream to use
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -53,11 +47,24 @@ const server = new McpServer({
   version: "1.0.0"
 });
 
+// =====================
+// Email Sending Tools
+// =====================
+
 /**
- * Send a single email
- * 
- * Sends an email to a specified recipient with the provided subject and content.
- * Defaults to environment-defined sender and message stream if not specified.
+ * Send a single email.
+ *
+ * @param {Object} params - The email parameters.
+ * @param {string} [params.from] - The sender's email address. Defaults to environment variable.
+ * @param {string} params.to - The recipient's email address.
+ * @param {string} params.subject - The subject of the email.
+ * @param {string} params.textBody - The plain text body of the email.
+ * @param {string} [params.messageStream] - The message stream to use. Defaults to environment variable.
+ * @param {string} [params.tag] - An optional tag for categorizing the email.
+ * @param {boolean} params.trackOpens - Whether to track opens (always true).
+ * @param {string} params.trackLinks - Link tracking mode (always 'HtmlAndText').
+ * @returns {Promise<Object>} Result object containing the Postmark MessageID.
+ * @throws {Error} If sending fails or required parameters are missing.
  */
 server.tool(
   "sendEmail",
@@ -66,17 +73,28 @@ server.tool(
     to: z.string().email(),
     subject: z.string(),
     textBody: z.string(),
-    messageStream: z.string().optional()
+    messageStream: z.string().optional(),
+    tag: z.string().optional(),
+    trackOpens: z.literal(true), // Always true
+    trackLinks: z.literal("HtmlAndText") // Always 'HtmlAndText'
   },
-  async ({ to, subject, textBody, from, messageStream }) => {
+  async ({ to, subject, textBody, from, messageStream, tag }) => {
     console.error('Received request to send email to:', to);
-    const result = await client.sendEmail({
+    // Build payload and only include Tag if defined and non-empty
+    const payload = {
       From: from || defaultSender,
       To: to,
       Subject: subject,
       TextBody: textBody,
-      MessageStream: messageStream || defaultMessageStream
-    });
+      MessageStream: messageStream || defaultMessageStream,
+      TrackOpens: true,
+      TrackLinks: "HtmlAndText"
+    };
+    if (tag && tag.trim() !== "") {
+      payload.Tag = tag;
+    }
+    console.error('Payload being sent to Postmark:', JSON.stringify(payload));
+    const result = await client.sendEmail(payload);
     console.error('Email sent successfully:', result.MessageID);
     return {
       content: [
@@ -87,10 +105,19 @@ server.tool(
 );
 
 /**
- * Send multiple emails in a batch
- * 
- * Efficiently sends multiple emails in a single API call.
- * Each message can have its own recipient, subject, and content.
+ * Send multiple emails in a batch.
+ *
+ * @param {Object} params - The batch parameters.
+ * @param {Array<Object>} params.messages - Array of message objects.
+ * @param {string} params.messages[].to - Recipient email address.
+ * @param {string} params.messages[].subject - Email subject.
+ * @param {string} params.messages[].textBody - Email body (plain text).
+ * @param {string} [params.messages[].from] - Sender email address. Defaults to environment variable.
+ * @param {string} [params.messages[].messageStream] - Message stream. Defaults to environment variable.
+ * @param {boolean} params.messages[].trackOpens - Whether to track opens (always true).
+ * @param {string} params.messages[].trackLinks - Link tracking mode (always 'HtmlAndText').
+ * @returns {Promise<Object>} Batch result from Postmark.
+ * @throws {Error} If sending fails or required parameters are missing.
  */
 server.tool(
   "sendEmailBatch",
@@ -100,7 +127,9 @@ server.tool(
       subject: z.string(),
       textBody: z.string(),
       from: z.string().optional(),
-      messageStream: z.string().optional()
+      messageStream: z.string().optional(),
+      trackOpens: z.literal(true),
+      trackLinks: z.literal("HtmlAndText")
     }))
   },
   async ({ messages }) => {
@@ -109,7 +138,9 @@ server.tool(
       To: msg.to,
       Subject: msg.subject,
       TextBody: msg.textBody,
-      MessageStream: msg.messageStream || defaultMessageStream
+      MessageStream: msg.messageStream || defaultMessageStream,
+      TrackOpens: true,
+      TrackLinks: "HtmlAndText"
     }));
     const result = await client.sendEmailBatch(batch);
     return { content: [{ type: "text", text: `Batch sent! Results: ${JSON.stringify(result)}` }] };
@@ -117,39 +148,73 @@ server.tool(
 );
 
 /**
- * Send an email using a template
- * 
- * Uses a Postmark template with the provided data model.
- * Templates must be created in Postmark or via the createTemplate tool.
+ * Send an email using a template.
+ *
+ * @param {Object} params - The template email parameters.
+ * @param {string} params.to - Recipient email address.
+ * @param {number} [params.templateId] - Template ID to use.
+ * @param {string} [params.templateAlias] - Template alias to use.
+ * @param {Object} params.templateModel - Data model for the template.
+ * @param {string} [params.from] - Sender email address. Defaults to environment variable.
+ * @param {string} [params.messageStream] - Message stream. Defaults to environment variable.
+ * @param {string} [params.tag] - Optional tag for categorization.
+ * @param {boolean} params.trackOpens - Whether to track opens (always true).
+ * @param {string} params.trackLinks - Link tracking mode (always 'HtmlAndText').
+ * @returns {Promise<Object>} Result object containing the Postmark MessageID.
+ * @throws {Error} If neither templateId nor templateAlias is provided, or if sending fails.
  */
 server.tool(
   "sendEmailWithTemplate",
   {
     to: z.string().email(),
-    templateId: z.number(),
+    templateId: z.number().optional(),
+    templateAlias: z.string().optional(),
     templateModel: z.object({}).passthrough(),
     from: z.string().optional(),
-    messageStream: z.string().optional()
+    messageStream: z.string().optional(),
+    tag: z.string().optional(),
+    trackOpens: z.literal(true),
+    trackLinks: z.literal("HtmlAndText")
   },
-  async ({ to, templateId, templateModel, from, messageStream }) => {
-    const result = await client.sendEmailWithTemplate({
+  async ({ to, templateId, templateAlias, templateModel, from, messageStream, tag }) => {
+    const payload = {
       From: from || defaultSender,
       To: to,
-      TemplateId: templateId,
       TemplateModel: templateModel,
-      MessageStream: messageStream || defaultMessageStream
-    });
+      MessageStream: messageStream || defaultMessageStream,
+      TrackOpens: true,
+      TrackLinks: "HtmlAndText"
+    };
+    if (templateId) {
+      payload.TemplateId = templateId;
+    } else if (templateAlias) {
+      payload.TemplateAlias = templateAlias;
+    } else {
+      throw new Error('Either templateId or templateAlias must be provided.');
+    }
+    if (tag && tag.trim() !== "") {
+      payload.Tag = tag;
+    }
+    const result = await client.sendEmailWithTemplate(payload);
     return { content: [{ type: "text", text: `Email sent with template! MessageID: ${result.MessageID}` }] };
   }
 );
 
+// =====================
 // Template Management Tools
+// =====================
 
 /**
- * Create a new email template
- * 
- * Creates a reusable email template in Postmark with the specified content.
- * Returns the template ID which can be used with sendEmailWithTemplate.
+ * Create a new email template.
+ *
+ * @param {Object} params - Template creation parameters.
+ * @param {string} params.name - Template name.
+ * @param {string} params.subject - Template subject.
+ * @param {string} params.htmlBody - HTML body of the template.
+ * @param {string} [params.textBody] - Plain text body of the template.
+ * @param {string} [params.alias] - Optional template alias.
+ * @returns {Promise<Object>} Result object containing the new template ID.
+ * @throws {Error} If creation fails or required parameters are missing.
  */
 server.tool(
   "createTemplate",
@@ -173,10 +238,17 @@ server.tool(
 );
 
 /**
- * Update an existing email template
- * 
- * Modifies an existing template identified by templateId.
- * Only the provided fields will be updated.
+ * Update an existing email template.
+ *
+ * @param {Object} params - Template update parameters.
+ * @param {number} params.templateId - ID of the template to update.
+ * @param {string} [params.name] - New template name.
+ * @param {string} [params.subject] - New subject.
+ * @param {string} [params.htmlBody] - New HTML body.
+ * @param {string} [params.textBody] - New plain text body.
+ * @param {string} [params.alias] - New alias.
+ * @returns {Promise<Object>} Result object containing the updated template ID.
+ * @throws {Error} If update fails or required parameters are missing.
  */
 server.tool(
   "updateTemplate",
@@ -195,9 +267,10 @@ server.tool(
 );
 
 /**
- * List all email templates
- * 
- * Retrieves all templates associated with the Postmark account.
+ * List all email templates.
+ *
+ * @returns {Promise<Object>} List of all templates associated with the Postmark account.
+ * @throws {Error} If retrieval fails.
  */
 server.tool(
   "listTemplates",
@@ -209,9 +282,12 @@ server.tool(
 );
 
 /**
- * Get a specific template by ID
- * 
- * Retrieves detailed information about a single template.
+ * Get a specific template by ID.
+ *
+ * @param {Object} params
+ * @param {number} params.templateId - ID of the template to retrieve.
+ * @returns {Promise<Object>} Detailed information about the template.
+ * @throws {Error} If retrieval fails or template does not exist.
  */
 server.tool(
   "getTemplate",
@@ -222,47 +298,87 @@ server.tool(
   }
 );
 
+// =====================
 // Statistics & Tracking Tools
+// =====================
 
 /**
- * Get email delivery statistics
- * 
- * Retrieves delivery statistics for the last 30 days,
- * including open rates and bounce rates.
+ * Get email delivery statistics.
+ *
+ * @param {Object} params - Statistics query parameters.
+ * @param {string} [params.tag] - Filter by tag.
+ * @param {string} [params.fromDate] - Start date (YYYY-MM-DD).
+ * @param {string} [params.toDate] - End date (YYYY-MM-DD).
+ * @param {string} [params.messageStream] - Filter by message stream.
+ * @returns {Promise<Object>} Delivery statistics summary.
+ * @throws {Error} If retrieval fails or API call errors.
  */
 server.tool(
   "getDeliveryStats",
-  {},
-  async () => {
-    const response = await fetch("https://api.postmarkapp.com/deliverystats", {
-      method: "GET",
-      headers: {
-        "X-Postmark-Server-Token": serverToken,
-        "Accept": "application/json"
-      }
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch delivery stats: ${response.status} ${response.statusText}`);
-    }
-    const stats = await response.json();
-    // Extract open and bounce rates for the last 30 days
-    const sent = stats.InactiveMails + stats.BouncedMails + stats.DeliveredMails;
-    const openRate = stats.Opens && sent ? (stats.Opens / sent) * 100 : null;
-    const bounceRate = stats.BouncedMails && sent ? (stats.BouncedMails / sent) * 100 : null;
-    return {
-      content: [
-        { type: "text", text: `Open Rate (last 30 days): ${openRate ? openRate.toFixed(2) : 'N/A'}%` },
-        { type: "text", text: `Bounce Rate (last 30 days): ${bounceRate ? bounceRate.toFixed(2) : 'N/A'}%` },
-        { type: "text", text: `Raw stats: ${JSON.stringify(stats)}` }
-      ]
+  {
+    tag: z.string().optional(),
+    fromDate: z.string().optional(), // YYYY-MM-DD
+    toDate: z.string().optional(),   // YYYY-MM-DD
+    messageStream: z.string().optional()
+  },
+  async (params) => {
+    // Build query string from params
+    const query = [];
+    if (params.fromDate) query.push(`fromdate=${encodeURIComponent(params.fromDate)}`);
+    if (params.toDate) query.push(`todate=${encodeURIComponent(params.toDate)}`);
+    if (params.tag) query.push(`tag=${encodeURIComponent(params.tag)}`);
+    if (params.messageStream) query.push(`messagestream=${encodeURIComponent(params.messageStream)}`);
+    
+    const url = `https://api.postmarkapp.com/stats/outbound${query.length ? '?' + query.join('&') : ''}`;
+
+    const headers = {
+      "Accept": "application/json",
+      "X-Postmark-Server-Token": serverToken
     };
+    
+    try {
+      const response = await fetch(url, { method: "GET", headers });
+      const data = await response.json();
+
+      // Calculate summary stats
+      const sent = data.Sent || 0;
+      const tracked = data.Tracked || 0; // emails with open tracking
+      const uniqueOpens = data.UniqueOpens || 0;
+      const totalTrackedLinks = data.TotalTrackedLinksSent || 0;
+      const uniqueLinksClicked = data.UniqueLinksClicked || 0;
+
+      // Open rate: cap at 100%
+      const openRate = tracked > 0 ? Math.min((uniqueOpens / tracked) * 100, 100).toFixed(1) : '0.0';
+      // Ensure values are always numbers
+      const safeTotalTrackedLinks = Number.isFinite(totalTrackedLinks) ? totalTrackedLinks : 0;
+      const safeUniqueLinksClicked = Number.isFinite(uniqueLinksClicked) ? uniqueLinksClicked : 0;
+      const safeClickRate = safeTotalTrackedLinks > 0 ? Math.min((safeUniqueLinksClicked / safeTotalTrackedLinks) * 100, 100).toFixed(1) : '0.0';
+
+      return {
+        content: [{
+          type: "text",
+          text: `You sent ${sent} emails in the selected period.\nOut of ${tracked} emails with open tracking, ${openRate}% were opened.\nOut of ${safeTotalTrackedLinks} tracked links, ${safeUniqueLinksClicked} unique links were clicked (${safeClickRate}%).`
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{ 
+          type: "text", 
+          text: `Error fetching delivery stats: ${err.toString()}` 
+        }]
+      };
+    }
   }
 );
 
 /**
- * Get sent message history
- * 
- * Retrieves a list of recently sent outbound messages with pagination.
+ * Get sent message history.
+ *
+ * @param {Object} params - Message history query parameters.
+ * @param {number} [params.count=10] - Number of messages to retrieve.
+ * @param {number} [params.offset=0] - Pagination offset.
+ * @returns {Promise<Object>} List of recently sent outbound messages.
+ * @throws {Error} If retrieval fails.
  */
 server.tool(
   "getOutboundMessages",
@@ -276,13 +392,18 @@ server.tool(
   }
 );
 
+// =====================
 // Domain Management Tools
+// =====================
 
 /**
- * Create a new sending domain
- * 
- * Registers a new domain with Postmark for sending emails.
- * Domain verification will be required after creation.
+ * Create a new sending domain.
+ *
+ * @param {Object} params - Domain creation parameters.
+ * @param {string} params.name - Domain name to register.
+ * @param {string} [params.returnPathDomain] - Optional return path domain.
+ * @returns {Promise<Object>} Result object containing the new domain ID.
+ * @throws {Error} If creation fails or required parameters are missing.
  */
 server.tool(
   "createDomain",
@@ -297,9 +418,12 @@ server.tool(
 );
 
 /**
- * Verify domain DKIM setup
- * 
- * Checks if DKIM records have been properly configured for a domain.
+ * Verify domain DKIM setup.
+ *
+ * @param {Object} params
+ * @param {number} params.domainId - ID of the domain to verify.
+ * @returns {Promise<Object>} DKIM verification result.
+ * @throws {Error} If verification fails or domain does not exist.
  */
 server.tool(
   "verifyDomainDKIM",
@@ -311,9 +435,12 @@ server.tool(
 );
 
 /**
- * Verify domain return path setup
- * 
- * Checks if return path records have been properly configured for a domain.
+ * Verify domain return path setup.
+ *
+ * @param {Object} params
+ * @param {number} params.domainId - ID of the domain to verify.
+ * @returns {Promise<Object>} Return path verification result.
+ * @throws {Error} If verification fails or domain does not exist.
  */
 server.tool(
   "verifyDomainReturnPath",
@@ -323,6 +450,10 @@ server.tool(
     return { content: [{ type: "text", text: `Return path verification: ${JSON.stringify(result)}` }] };
   }
 );
+
+// =====================
+// Server Initialization
+// =====================
 
 // Initialize and start the server
 console.error('Starting MCP server...');
