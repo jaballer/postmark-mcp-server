@@ -61,8 +61,6 @@ const server = new McpServer({
  * @param {string} params.textBody - The plain text body of the email.
  * @param {string} [params.messageStream] - The message stream to use. Defaults to environment variable.
  * @param {string} [params.tag] - An optional tag for categorizing the email.
- * @param {boolean} params.trackOpens - Whether to track opens (always true).
- * @param {string} params.trackLinks - Link tracking mode (always 'HtmlAndText').
  * @returns {Promise<Object>} Result object containing the Postmark MessageID.
  * @throws {Error} If sending fails or required parameters are missing.
  */
@@ -79,71 +77,37 @@ server.tool(
     trackLinks: z.literal("HtmlAndText") // Always 'HtmlAndText'
   },
   async ({ to, subject, textBody, from, messageStream, tag }) => {
-    console.error('Received request to send email to:', to);
-    // Build payload and only include Tag if defined and non-empty
-    const payload = {
-      From: from || defaultSender,
-      To: to,
-      Subject: subject,
-      TextBody: textBody,
-      MessageStream: messageStream || defaultMessageStream,
-      TrackOpens: true,
-      TrackLinks: "HtmlAndText"
-    };
-    if (tag && tag.trim() !== "") {
-      payload.Tag = tag;
+    try {
+      console.error('Received request to send email to:', to);
+      // Build payload and only include Tag if defined and non-empty
+      const payload = {
+        From: from || defaultSender,
+        To: to,
+        Subject: subject,
+        TextBody: textBody,
+        MessageStream: messageStream || defaultMessageStream,
+        TrackOpens: true,
+        TrackLinks: "HtmlAndText"
+      };
+      if (tag && tag.trim() !== "") {
+        payload.Tag = tag;
+      }
+      console.error('Payload being sent to Postmark:', JSON.stringify(payload));
+      const result = await client.sendEmail(payload);
+      console.error('Email sent successfully:', result.MessageID);
+      return {
+        content: [
+          { type: "text", text: `Email sent! MessageID: ${result.MessageID}` }
+        ]
+      };
+    } catch (error) {
+      console.error('Failed to send email:', error);
+      return {
+        content: [
+          { type: "text", text: `Failed to send email: ${error.message || 'Unknown error'}` }
+        ]
+      };
     }
-    console.error('Payload being sent to Postmark:', JSON.stringify(payload));
-    const result = await client.sendEmail(payload);
-    console.error('Email sent successfully:', result.MessageID);
-    return {
-      content: [
-        { type: "text", text: `Email sent! MessageID: ${result.MessageID}` }
-      ]
-    };
-  }
-);
-
-/**
- * Send multiple emails in a batch.
- *
- * @param {Object} params - The batch parameters.
- * @param {Array<Object>} params.messages - Array of message objects.
- * @param {string} params.messages[].to - Recipient email address.
- * @param {string} params.messages[].subject - Email subject.
- * @param {string} params.messages[].textBody - Email body (plain text).
- * @param {string} [params.messages[].from] - Sender email address. Defaults to environment variable.
- * @param {string} [params.messages[].messageStream] - Message stream. Defaults to environment variable.
- * @param {boolean} params.messages[].trackOpens - Whether to track opens (always true).
- * @param {string} params.messages[].trackLinks - Link tracking mode (always 'HtmlAndText').
- * @returns {Promise<Object>} Batch result from Postmark.
- * @throws {Error} If sending fails or required parameters are missing.
- */
-server.tool(
-  "sendEmailBatch",
-  {
-    messages: z.array(z.object({
-      to: z.string().email(),
-      subject: z.string(),
-      textBody: z.string(),
-      from: z.string().optional(),
-      messageStream: z.string().optional(),
-      trackOpens: z.literal(true),
-      trackLinks: z.literal("HtmlAndText")
-    }))
-  },
-  async ({ messages }) => {
-    const batch = messages.map(msg => ({
-      From: msg.from || defaultSender,
-      To: msg.to,
-      Subject: msg.subject,
-      TextBody: msg.textBody,
-      MessageStream: msg.messageStream || defaultMessageStream,
-      TrackOpens: true,
-      TrackLinks: "HtmlAndText"
-    }));
-    const result = await client.sendEmailBatch(batch);
-    return { content: [{ type: "text", text: `Batch sent! Results: ${JSON.stringify(result)}` }] };
   }
 );
 
@@ -177,94 +141,43 @@ server.tool(
     trackLinks: z.literal("HtmlAndText")
   },
   async ({ to, templateId, templateAlias, templateModel, from, messageStream, tag }) => {
-    const payload = {
-      From: from || defaultSender,
-      To: to,
-      TemplateModel: templateModel,
-      MessageStream: messageStream || defaultMessageStream,
-      TrackOpens: true,
-      TrackLinks: "HtmlAndText"
-    };
-    if (templateId) {
-      payload.TemplateId = templateId;
-    } else if (templateAlias) {
-      payload.TemplateAlias = templateAlias;
-    } else {
-      throw new Error('Either templateId or templateAlias must be provided.');
+    try {
+      const payload = {
+        From: from || defaultSender,
+        To: to,
+        TemplateModel: templateModel,
+        MessageStream: messageStream || defaultMessageStream,
+        TrackOpens: true,
+        TrackLinks: "HtmlAndText"
+      };
+      if (templateId) {
+        payload.TemplateId = templateId;
+      } else if (templateAlias) {
+        payload.TemplateAlias = templateAlias;
+      } else {
+        throw new Error('Either templateId or templateAlias must be provided.');
+      }
+      if (tag && tag.trim() !== "") {
+        payload.Tag = tag;
+      }
+      console.error('Sending template email to:', to);
+      const result = await client.sendEmailWithTemplate(payload);
+      console.error('Template email sent successfully:', result.MessageID);
+      return { content: [{ type: "text", text: `Email sent with template! MessageID: ${result.MessageID}` }] };
+    } catch (error) {
+      console.error('Failed to send template email:', error);
+      return {
+        content: [
+          { type: "text", text: `Failed to send template email: ${error.message || 'Unknown error'}` }
+        ]
+      };
     }
-    if (tag && tag.trim() !== "") {
-      payload.Tag = tag;
-    }
-    const result = await client.sendEmailWithTemplate(payload);
-    return { content: [{ type: "text", text: `Email sent with template! MessageID: ${result.MessageID}` }] };
   }
 );
 
 // =====================
 // Template Management Tools
 // =====================
-
-/**
- * Create a new email template.
- *
- * @param {Object} params - Template creation parameters.
- * @param {string} params.name - Template name.
- * @param {string} params.subject - Template subject.
- * @param {string} params.htmlBody - HTML body of the template.
- * @param {string} [params.textBody] - Plain text body of the template.
- * @param {string} [params.alias] - Optional template alias.
- * @returns {Promise<Object>} Result object containing the new template ID.
- * @throws {Error} If creation fails or required parameters are missing.
- */
-server.tool(
-  "createTemplate",
-  {
-    name: z.string(),
-    subject: z.string(),
-    htmlBody: z.string(),
-    textBody: z.string().optional(),
-    alias: z.string().optional()
-  },
-  async ({ name, subject, htmlBody, textBody, alias }) => {
-    const result = await client.createTemplate({
-      Name: name,
-      Subject: subject,
-      HtmlBody: htmlBody,
-      TextBody: textBody || "",
-      Alias: alias
-    });
-    return { content: [{ type: "text", text: `Template created! ID: ${result.TemplateId}` }] };
-  }
-);
-
-/**
- * Update an existing email template.
- *
- * @param {Object} params - Template update parameters.
- * @param {number} params.templateId - ID of the template to update.
- * @param {string} [params.name] - New template name.
- * @param {string} [params.subject] - New subject.
- * @param {string} [params.htmlBody] - New HTML body.
- * @param {string} [params.textBody] - New plain text body.
- * @param {string} [params.alias] - New alias.
- * @returns {Promise<Object>} Result object containing the updated template ID.
- * @throws {Error} If update fails or required parameters are missing.
- */
-server.tool(
-  "updateTemplate",
-  {
-    templateId: z.number(),
-    name: z.string().optional(),
-    subject: z.string().optional(),
-    htmlBody: z.string().optional(),
-    textBody: z.string().optional(),
-    alias: z.string().optional()
-  },
-  async ({ templateId, ...fields }) => {
-    const result = await client.editTemplate(templateId, fields);
-    return { content: [{ type: "text", text: `Template updated! ID: ${result.TemplateId}` }] };
-  }
-);
 
 /**
  * List all email templates.
@@ -278,23 +191,6 @@ server.tool(
   async () => {
     const result = await client.getTemplates();
     return { content: [{ type: "text", text: JSON.stringify(result.Templates) }] };
-  }
-);
-
-/**
- * Get a specific template by ID.
- *
- * @param {Object} params
- * @param {number} params.templateId - ID of the template to retrieve.
- * @returns {Promise<Object>} Detailed information about the template.
- * @throws {Error} If retrieval fails or template does not exist.
- */
-server.tool(
-  "getTemplate",
-  { templateId: z.number() },
-  async ({ templateId }) => {
-    const result = await client.getTemplate(templateId);
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
   }
 );
 
@@ -317,8 +213,8 @@ server.tool(
   "getDeliveryStats",
   {
     tag: z.string().optional(),
-    fromDate: z.string().optional(), // YYYY-MM-DD
-    toDate: z.string().optional(),   // YYYY-MM-DD
+    fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional(),
+    toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional(),
     messageStream: z.string().optional()
   },
   async (params) => {
@@ -389,65 +285,6 @@ server.tool(
   async ({ count = 10, offset = 0 }) => {
     const result = await client.getOutboundMessages({ count, offset });
     return { content: [{ type: "text", text: JSON.stringify(result.Messages) }] };
-  }
-);
-
-// =====================
-// Domain Management Tools
-// =====================
-
-/**
- * Create a new sending domain.
- *
- * @param {Object} params - Domain creation parameters.
- * @param {string} params.name - Domain name to register.
- * @param {string} [params.returnPathDomain] - Optional return path domain.
- * @returns {Promise<Object>} Result object containing the new domain ID.
- * @throws {Error} If creation fails or required parameters are missing.
- */
-server.tool(
-  "createDomain",
-  {
-    name: z.string(),
-    returnPathDomain: z.string().optional()
-  },
-  async ({ name, returnPathDomain }) => {
-    const result = await client.createDomain({ Name: name, ReturnPathDomain: returnPathDomain });
-    return { content: [{ type: "text", text: `Domain created! ID: ${result.ID}` }] };
-  }
-);
-
-/**
- * Verify domain DKIM setup.
- *
- * @param {Object} params
- * @param {number} params.domainId - ID of the domain to verify.
- * @returns {Promise<Object>} DKIM verification result.
- * @throws {Error} If verification fails or domain does not exist.
- */
-server.tool(
-  "verifyDomainDKIM",
-  { domainId: z.number() },
-  async ({ domainId }) => {
-    const result = await client.verifyDomainDKIM(domainId);
-    return { content: [{ type: "text", text: `DKIM verification: ${JSON.stringify(result)}` }] };
-  }
-);
-
-/**
- * Verify domain return path setup.
- *
- * @param {Object} params
- * @param {number} params.domainId - ID of the domain to verify.
- * @returns {Promise<Object>} Return path verification result.
- * @throws {Error} If verification fails or domain does not exist.
- */
-server.tool(
-  "verifyDomainReturnPath",
-  { domainId: z.number() },
-  async ({ domainId }) => {
-    const result = await client.verifyDomainReturnPath(domainId);
-    return { content: [{ type: "text", text: `Return path verification: ${JSON.stringify(result)}` }] };
   }
 );
 
